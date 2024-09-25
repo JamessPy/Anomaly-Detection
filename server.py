@@ -1,46 +1,41 @@
-from flask import Flask, Response
+from flask import Flask
+from flask_socketio import SocketIO, emit
 import random
 import time
 
 app = Flask(__name__)
+socketio = SocketIO(app)
 
 # Generate data
 def generate_data():
     while True:
         try:
-            if time.time() % 20 < 1 and time.time() % 20 >= 0:
-                value = round(random.uniform(6, 7), 5)   # Value between 10 and 20
+            if time.time() % 20 < 1:  # Approximately once every 20 seconds
+                value = round(random.uniform(6, 7), 5)  # Value between 6 and 7
             
-            elif time.time() % 20 >= 5 and  time.time() % 20 <= 6:
-                value = round(random.uniform(0, 1), 5)  # Value between 10 and 20
+            elif time.time() % 20 >= 5 and time.time() % 20 <= 6:  # Approximately once every 20 seconds
+                value = round(random.uniform(0, 1), 5)  # Value between 0 and 1
             else:
-                value = round(random.uniform(3, 4), 5)  #  Value between 0 and 1
+                value = round(random.uniform(3, 4), 5)  # Value between 3 and 4
 
-            time.sleep(1) # Wait a second
-            yield f"data: {value}\n\n"
+            socketio.sleep(1)  # Wait a second
+            socketio.emit('data_update', {'value': value})  # Emit data via WebSocket
             
-        
-        # Error handling while generating data
         except Exception as e:
             print(f"Error occurred while generating data: {e}")
-            yield "data: An error occurred\n\n"
 
-#URL
-@app.route('/stream')
+# Start the data generation in a background thread
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected')
 
-def stream():
-    try:
-        return Response(generate_data(), mimetype='text/event-stream')
-    
-    # Error handling while streaming
-    except Exception as e:
-        print(f"Error occurred while opening the stream: {e}")
-        return Response("data: An error occurred\n\n", status=500)
+    # Start generating data
+    socketio.start_background_task(generate_data)
+
+# Error handling
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected')
 
 if __name__ == '__main__':
-    try:
-        app.run(debug=True, threaded=True)
-
-    # Error handling while starting app
-    except Exception as e:
-        print(f"Error occurred while starting the Flask application: {e}")
+    socketio.run(app, debug=True)

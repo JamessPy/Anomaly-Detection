@@ -1,7 +1,10 @@
-import requests
+import socketio
 import math
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+
+# Initialize SocketIO client
+sio = socketio.Client()
 
 # Create a list to store the last n data points and their labels
 data_buffer = []
@@ -9,10 +12,10 @@ labels_buffer = []
 n = 30  # Store the last 30 data points
 
 # Define the value of k
-k = 3  # Smaller k value allows for more sensitive control ---5
+k = 3  
 
 # Distance threshold for outlier detection
-distance_threshold = 0.2  # A small distance threshold can yield more precise results -0.1
+distance_threshold = 0.2  
 
 # Lists to store normal and outlier data
 normal_data = []
@@ -62,66 +65,67 @@ plt.title('Live Stream Data')
 plt.xlabel('Data Index')
 plt.ylabel('Value')
 
-# Function to update live data
-def update(frame):
-    url = 'http://127.0.0.1:5000/stream'
-    
+# Function to handle incoming data from WebSocket
+@sio.on('data_update')
+def handle_data(data):
     try:
-        with requests.get(url, stream=True) as response:
-            response.raise_for_status()
-            for line in response.iter_lines():
-                if line:
-                    line_str = line.decode('utf-8').strip()
-                    
-                    # Extract the data from the "data: " prefix
-                    if line_str.startswith("data: "):
-                        try:
-                            # Get the part after "data: "
-                            data_str = line_str.split("data: ")[1]
-                            data = float(data_str)  # Convert the value to float
-                            
-                            print(f"Received: {data}")
-                            
-                            # Add the data point and label
-                            label = data  # Currently using the data as the label; this can be changed
-                            add_data_point(data, label)
-                            
-                            # Perform outlier detection after receiving n data points
-                            if len(data_buffer) >= n:
-                                if is_outlier(data):
-                                    print(f"Outlier Detected: {data} \n")
-                                    outliers.append(data)
-                                    normal_data.append(float('nan'))  # No normal data for outlier
-                                else:
-                                    print(f"Data is normal: {data} \n")
-                                    normal_data.append(data)
-                                    outliers.append(float('nan'))  # No outlier data for normal data
-                            
-                            # Show only the last n data points
-                            normal_plot_data = normal_data[-n:]
-                            outlier_plot_data = outliers[-n:]
-                            
-                            # Update the plot
-                            ax.clear()
-                            ax.scatter(range(len(normal_plot_data)), normal_plot_data, label="Normal Data", color='blue', s=100)
-                            ax.scatter(range(len(outlier_plot_data)), outlier_plot_data, label="Outliers", color='red', s=100)
-                            
-                            # Draw horizontal black lines at y=1 and y=3
-                            ax.axhline(y=3, color='black', linestyle='--', label='Y=3')
-                            ax.axhline(y=4, color='black', linestyle='--', label='Y=4')
+        value = data['value']  # Get the data value from the message
+        print(f"Received: {value}")
+        
+        # Add the data point and label
+        label = value  # Currently using the data as the label; this can be changed
+        add_data_point(value, label)
+        
+        # Perform outlier detection after receiving n data points
+        if len(data_buffer) >= n:
+            if is_outlier(value):
+                print(f"Outlier Detected: {value} \n")
+                outliers.append(value)
+                if len(outliers) > n:
+                    outliers.pop(0)  # Maintain size of outliers list
+                normal_data.append(float('nan'))  # No normal data for outlier
+            else:
+                print(f"Data is normal: {value} \n")
+                normal_data.append(value)
+                if len(normal_data) > n:
+                    normal_data.pop(0)  # Maintain size of normal_data list
+                outliers.append(float('nan'))  # No outlier data for normal data
+                if len(outliers) > n:
+                    outliers.pop(0)  # Maintain size of outliers list
+        
+    except Exception as e:
+        print(f"Error processing data: {e}")
 
-                            ax.legend(loc='upper left')
-                            ax.set_title("Live Stream")
-                            ax.set_xlabel("Data Index")
-                            ax.set_ylabel("Value")
-                            
-                        except ValueError:
-                            print(f"Could not convert data to float: {line_str}")
-                        break  # We only process one line of data at a time
+# Function to update the plot
+def update_plot(frame):
+    # Show only the last n data points
+    normal_plot_data = normal_data[-n:]
+    outlier_plot_data = outliers[-n:]
+    
+    ax.clear()
+    ax.scatter(range(len(normal_plot_data)), normal_plot_data, label="Normal Data", color='blue', s=100)
+    ax.scatter(range(len(outlier_plot_data)), outlier_plot_data, label="Outliers", color='red', s=100)
+    
+    # Draw horizontal black lines at y=1 and y=3
+    ax.axhline(y=3, color='black', linestyle='--', label='Y=3')
+    ax.axhline(y=4, color='black', linestyle='--', label='Y=4')
 
-    except requests.exceptions.RequestException as req_err:
-        print(f"An unexpected error occurred: {req_err}")
+    ax.legend(loc='upper left')
+    ax.set_title("Live Stream")
+    ax.set_xlabel("Data Index")
+    ax.set_ylabel("Value")
+
+# Start the SocketIO client and connect to the server
+def start_socketio():
+    try:
+        sio.connect('http://127.0.0.1:5000')  # Update with your WebSocket server URL
+    except Exception as e:
+        print(f"Connection error: {e}")
+
+# Start the SocketIO connection in a separate thread
+import threading
+threading.Thread(target=start_socketio).start()
 
 # Start the animation
-ani = FuncAnimation(fig, update, interval=250)  # Call the update function every 1 second (1000ms)
+ani = FuncAnimation(fig, update_plot, interval=1000, cache_frame_data=False, save_count=n)  # Call the update function every 1 second
 plt.show()
